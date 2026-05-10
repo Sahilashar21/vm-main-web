@@ -99,7 +99,33 @@ def upload_epaper_image(file_data, public_id=None):
         overwrite=True,
         folder="vm_epaper",
         transformation=[
-            {"quality": "auto", "fetch_format": "auto"},
+            {"quality": "auto:best", "fetch_format": "auto"},
+        ],
+        resource_type="image",
+    )
+
+    return {
+        "url": result.get("secure_url", ""),
+        "public_id": result.get("public_id", ""),
+    }
+
+
+def upload_epaper_page_image(file_data, public_id):
+    """
+    Upload an extracted e-paper page image (thumbnail or full resolution).
+
+    Returns:
+        dict with 'url' and 'public_id'.
+    """
+    _ensure_configured()
+
+    result = cloudinary.uploader.upload(
+        file_data,
+        public_id=public_id,
+        overwrite=True,
+        folder="vm_epaper/pages",
+        transformation=[
+            {"quality": "auto:best", "fetch_format": "auto"},
         ],
         resource_type="image",
     )

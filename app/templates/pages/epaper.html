@@ -946,6 +946,7 @@
     let flipbookInstance = null;
     let flipbookTotalPages = 0;
     let currentFlipPage = 1;
+    let activeFlipPages = [];
 
     /* ═══════════════════════════════════════════════
        FETCH EDITIONS FROM API
@@ -968,6 +969,14 @@
         return `https://drive.google.com/file/d/${fileId}/preview`;
       }
       return rawUrl;
+    }
+
+    function cloudinaryBestQuality(url) {
+      if (!url || typeof url !== 'string') return url;
+      if (!url.includes('res.cloudinary.com')) return url;
+      if (url.includes('/q_auto:best') || url.includes('/q_100')) return url;
+      if (!url.includes('/upload/')) return url;
+      return url.replace('/upload/', '/upload/f_auto,q_auto:best,c_limit/');
     }
 
     function normalizeEdition(e, index) {
@@ -1001,6 +1010,16 @@
         viewerUrl: e.viewer_url || null,
         totalPages: e.total_pages || 0,
         totalArticles: e.total_articles || 0,
+        pageImages: Array.isArray(e.page_images)
+          ? e.page_images
+              .map((p, pageIdx) => ({
+                page_number: p.page_number || (pageIdx + 1),
+                thumbnail_url: cloudinaryBestQuality(p.thumbnail_url || ''),
+                fullres_url: cloudinaryBestQuality(p.fullres_url || p.image_url || ''),
+              }))
+              .sort((a, b) => a.page_number - b.page_number)
+          : [],
+        imageProfile: e.image_profile || {},
         // Accept a variety of keys returned by different backends (camelCase, snake_case, link)
         pdf: e.pdf || e.pdf_url || e.file_url || e.fileUrl || e.pdfUrl || e.document_url || e.link || null,
         url: e.url || e.link || e.source_url || e.pdf || e.pdf_url || e.fileUrl || null,
@@ -1270,6 +1289,8 @@
     function destroyFlipbook() {
       flipbookInstance = null;
       flipbookTotalPages = 0;
+      currentFlipPage = 1;
+      activeFlipPages = [];
       const host = document.getElementById('flipbookHost');
       const pageCount = document.getElementById('flipPageCount');
       if (host) host.innerHTML = '';
@@ -1300,29 +1321,50 @@
       if (expandBtn) expandBtn.innerHTML = '<i class="fa fa-compress"></i> Exit Full';
 
       try {
-        if (!pdfUrl) throw new Error('Invalid PDF URL');
-
-        // Use Cloudinary/direct URL for the iframe
-        let embedUrl = pdfUrl;
-        const fileId = extractGoogleDriveFileId(pdfUrl);
-        if (fileId) {
-          embedUrl = `https://drive.google.com/file/d/${fileId}/preview`;
-        }
-
         const host = document.getElementById('flipbookHost');
         host.innerHTML = '';
-        
-        const iframe = document.createElement('iframe');
-        iframe.src = embedUrl;
-        iframe.style.width = '100%';
-        iframe.style.height = '100%';
-        iframe.style.border = 'none';
-        iframe.style.borderRadius = '8px';
-        iframe.allow = 'fullscreen';
-        host.appendChild(iframe);
 
-        flipbookTotalPages = 1;
-        currentFlipPage = 1;
+        if (activeFlipPages.length) {
+          const image = document.createElement('img');
+          image.id = 'flipbookImage';
+          image.src = activeFlipPages[0].fullres_url || activeFlipPages[0].thumbnail_url || '';
+          image.alt = 'E-Paper page 1';
+          image.style.maxWidth = '100%';
+          image.style.maxHeight = '100%';
+          image.style.width = 'auto';
+          image.style.height = 'auto';
+          image.style.objectFit = 'contain';
+          image.style.borderRadius = '8px';
+          host.style.display = 'flex';
+          host.style.alignItems = 'center';
+          host.style.justifyContent = 'center';
+          host.appendChild(image);
+
+          flipbookTotalPages = activeFlipPages.length;
+          currentFlipPage = 1;
+        } else {
+          if (!pdfUrl) throw new Error('Invalid PDF URL');
+
+          // Use Cloudinary/direct URL for the iframe
+          let embedUrl = pdfUrl;
+          const fileId = extractGoogleDriveFileId(pdfUrl);
+          if (fileId) {
+            embedUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+          }
+
+          const iframe = document.createElement('iframe');
+          iframe.src = embedUrl;
+          iframe.style.width = '100%';
+          iframe.style.height = '100%';
+          iframe.style.border = 'none';
+          iframe.style.borderRadius = '8px';
+          iframe.allow = 'fullscreen';
+          host.appendChild(iframe);
+
+          flipbookTotalPages = 1;
+          currentFlipPage = 1;
+        }
+
         const pageCountEl = document.getElementById('flipPageCount');
         if (pageCountEl) pageCountEl.textContent = `${currentFlipPage} / ${flipbookTotalPages}`;
 
@@ -1404,6 +1446,14 @@
         host.classList.remove(cls);
         if (dir === 'next' && currentFlipPage < flipbookTotalPages) currentFlipPage++;
         if (dir === 'prev' && currentFlipPage > 1) currentFlipPage--;
+        if (activeFlipPages.length) {
+          const current = activeFlipPages[currentFlipPage - 1] || {};
+          const image = document.getElementById('flipbookImage');
+          if (image) {
+            image.src = current.fullres_url || current.thumbnail_url || '';
+            image.alt = `E-Paper page ${currentFlipPage}`;
+          }
+        }
         const pageCountEl = document.getElementById('flipPageCount');
         if (pageCountEl) pageCountEl.textContent = `${currentFlipPage} / ${flipbookTotalPages}`;
       }, 360);
@@ -1447,6 +1497,7 @@
       const downBtn = document.getElementById('mDownBtn');
       const isStudio = e.editionType === 'studio';
       const readUrl = e.pdf || e.url;
+      const hasPageImages = Array.isArray(e.pageImages) && e.pageImages.length > 0;
 
       if (isStudio && e.viewerUrl) {
         // Studio edition — open the article viewer page
@@ -1459,11 +1510,16 @@
         downBtn.style.opacity = '1';
         downBtn.innerHTML = '<i class="fa fa-external-link-alt"></i> Open Viewer';
         downBtn.onclick = () => { window.open(e.viewerUrl, '_blank'); };
-      } else if (readUrl) {
+      } else if (readUrl || hasPageImages) {
         readBtn.disabled = false;
         readBtn.style.opacity = '1';
-        readBtn.innerHTML = '<i class="fa fa-book-open"></i> Read Edition';
-        readBtn.onclick = () => openPdfViewer(readUrl);
+        readBtn.innerHTML = hasPageImages
+          ? '<i class="fa fa-images"></i> Read HD Pages'
+          : '<i class="fa fa-book-open"></i> Read Edition';
+        readBtn.onclick = () => {
+          activeFlipPages = hasPageImages ? e.pageImages : [];
+          openPdfViewer(readUrl);
+        };
 
         downBtn.disabled = false;
         downBtn.style.opacity = '1';

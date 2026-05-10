@@ -8,7 +8,7 @@ import re
 from datetime import datetime, timezone
 from functools import wraps
 
-from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
 
 epaper_bp = Blueprint("epaper", __name__)
 
@@ -39,6 +39,24 @@ def _is_api_request():
         or request.is_json
         or request.headers.get("X-Requested-With") == "XMLHttpRequest"
     )
+
+
+def _is_supported_image_upload(file_storage):
+    if not file_storage:
+        return False
+
+    signature = file_storage.stream.read(32)
+    file_storage.stream.seek(0)
+
+    if signature.startswith(b"\x89PNG\r\n\x1a\n"):  # PNG
+        return True
+    if signature.startswith(b"\xff\xd8\xff"):  # JPEG
+        return True
+    if signature[:6] in {b"GIF87a", b"GIF89a"}:  # GIF
+        return True
+    if signature.startswith(b"RIFF") and signature[8:12] == b"WEBP":  # WEBP
+        return True
+    return False
 
 
 def admin_required(view):
@@ -173,7 +191,7 @@ def api_upload_image():
 
     allowed = {"png", "jpg", "jpeg", "webp", "gif"}
     ext = photo.filename.rsplit(".", 1)[-1].lower() if "." in photo.filename else ""
-    if ext not in allowed:
+    if ext not in allowed or not _is_supported_image_upload(photo):
         return jsonify({"error": "Invalid file type."}), 400
 
     try:
@@ -209,7 +227,7 @@ def api_replace_thumbnail():
 
     allowed = {"png", "jpg", "jpeg", "webp", "gif"}
     ext = photo.filename.rsplit(".", 1)[-1].lower() if "." in photo.filename else ""
-    if ext not in allowed:
+    if ext not in allowed or not _is_supported_image_upload(photo):
         return jsonify({"error": "Invalid file type."}), 400
 
     col = _get_editions_col()
@@ -251,8 +269,13 @@ def api_replace_thumbnail():
             {"$set": {"pages": pages, "updated_at": datetime.now(timezone.utc).isoformat()}},
         )
         return jsonify({"success": True, "thumbnail_url": thumbnail_url, "page_number": page_number})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception(
+            "Failed to replace thumbnail for edition %s page %s",
+            edition_date,
+            page_number,
+        )
+        return jsonify({"error": "Thumbnail replacement failed."}), 500
 
 
 # ── AI: Translate ──────────────────────────────────

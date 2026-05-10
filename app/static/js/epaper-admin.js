@@ -17,7 +17,7 @@ const EPAdmin = {
   resizeStart: null,
 
   CANVAS_W: 800,
-  CANVAS_H: 1130,
+  CANVAS_H: 1000,
 
   init() {
     this.loadEditions();
@@ -818,7 +818,7 @@ const EPAdmin = {
 
   replacePageThumbnail(pageIndex) {
     if (!this.currentEdition?.date) {
-      this.showToast('Save or open an edition first.');
+      this.showToast('Please save the current edition or open an existing edition first.');
       return;
     }
 
@@ -835,6 +835,10 @@ const EPAdmin = {
   async uploadPageThumbnail(pageIndex, file) {
     const page = this.pages[pageIndex];
     if (!page || !this.currentEdition?.date) return;
+    if (file.size > (10 * 1024 * 1024)) {
+      this.showToast('Please choose an image smaller than 10MB.');
+      return;
+    }
 
     const formData = new FormData();
     formData.append('image', file);
@@ -848,15 +852,16 @@ const EPAdmin = {
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || 'Thumbnail update failed.');
+        this.showToast(data.error || 'Thumbnail upload failed.');
         return;
       }
 
-      this.showToast('Thumbnail replaced.');
+      this.showToast('Thumbnail replaced successfully.');
       await this.editEdition(this.currentEdition.date);
       this.openPage(Math.min(pageIndex, this.pages.length - 1));
     } catch (error) {
-      alert('Thumbnail update failed.');
+      console.error(error);
+      this.showToast(error?.message || 'Thumbnail upload failed.');
     }
   },
 

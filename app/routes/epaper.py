@@ -186,6 +186,75 @@ def api_upload_image():
         return jsonify({"error": str(e)}), 500
 
 
+@epaper_bp.route("/api/epaper/admin/replace-thumbnail", methods=["POST"])
+@admin_required
+def api_replace_thumbnail():
+    photo = request.files.get("image")
+    edition_date = (request.form.get("edition_date") or "").strip()
+    page_number_raw = (request.form.get("page_number") or "").strip()
+
+    if not re.match(r"\d{4}-\d{2}-\d{2}$", edition_date):
+        return jsonify({"error": "edition_date required (YYYY-MM-DD)."}), 400
+
+    try:
+        page_number = int(page_number_raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "page_number must be a positive integer."}), 400
+
+    if page_number < 1:
+        return jsonify({"error": "page_number must be a positive integer."}), 400
+
+    if not photo or photo.filename == "":
+        return jsonify({"error": "No image file provided."}), 400
+
+    allowed = {"png", "jpg", "jpeg", "webp", "gif"}
+    ext = photo.filename.rsplit(".", 1)[-1].lower() if "." in photo.filename else ""
+    if ext not in allowed:
+        return jsonify({"error": "Invalid file type."}), 400
+
+    col = _get_editions_col()
+    edition = col.find_one({"date": edition_date})
+    if not edition:
+        return jsonify({"error": "Edition not found."}), 404
+
+    pages = edition.get("pages", [])
+    page_index = None
+    for idx, page in enumerate(pages):
+        try:
+            current_page_number = int(page.get("page_number", idx + 1))
+        except (TypeError, ValueError):
+            current_page_number = idx + 1
+        if current_page_number == page_number:
+            page_index = idx
+            break
+
+    if page_index is None and page_number <= len(pages):
+        page_index = page_number - 1
+
+    if page_index is None:
+        return jsonify({"error": "Page not found in this edition."}), 404
+
+    try:
+        from app.utils.cloudinary_util import upload_epaper_image
+
+        upload_result = upload_epaper_image(
+            photo,
+            public_id=f"vm_epaper/thumb_{edition_date.replace('-', '')}_p{page_number}",
+        )
+        thumbnail_url = upload_result.get("url", "")
+        if not thumbnail_url:
+            return jsonify({"error": "Upload failed."}), 500
+
+        pages[page_index]["thumbnail_url"] = thumbnail_url
+        col.update_one(
+            {"date": edition_date},
+            {"$set": {"pages": pages, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        )
+        return jsonify({"success": True, "thumbnail_url": thumbnail_url, "page_number": page_number})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── AI: Translate ──────────────────────────────────
 @epaper_bp.route("/api/epaper/translate", methods=["POST"])
 def api_translate():

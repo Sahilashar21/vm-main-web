@@ -3,6 +3,7 @@ Admin routes: admin panel, legacy e-paper upload, excel upload, user management.
 All data stored in MongoDB + Cloudinary. No external API dependencies.
 """
 import os
+import io
 import re
 import tempfile
 import uuid
@@ -167,7 +168,7 @@ def legacy_epaper_upload():
             if not pdf_bytes:
                 return jsonify({"error": "Uploaded PDF is empty."}), 400
 
-            result = upload_epaper_pdf(pdf_bytes, filename=f"{lang}_{week}".replace(" ", "_"))
+            result = upload_epaper_pdf(io.BytesIO(pdf_bytes), filename=f"{lang}_{week}".replace(" ", "_"))
             pdf_url = result.get("url", "")
             pdf_public_id = result.get("public_id", "")
 
@@ -204,7 +205,6 @@ def legacy_epaper_upload():
             "estimated_total_mb": round(
                 (extracted["thumbnail_total_bytes"] + extracted["fullres_total_bytes"]) / BYTES_PER_MB, 2
             ),
-            "admin_note": "300 DPI full-page images improve clarity and increase storage/bandwidth compared to older lower-resolution uploads.",
         },
         "created_at": datetime.now(timezone.utc),
     }
@@ -243,6 +243,7 @@ def legacy_epaper_delete(edition_id):
     """Delete a legacy e-paper edition from MongoDB and Cloudinary."""
     from bson import ObjectId
     from app.utils.mongo import get_epaper_legacy_collection
+    from app.utils.cloudinary_util import delete_cloudinary_file
 
     col = get_epaper_legacy_collection()
     try:
@@ -256,7 +257,6 @@ def legacy_epaper_delete(edition_id):
     # Delete PDF from Cloudinary
     if doc.get("pdf_public_id"):
         try:
-            from app.utils.cloudinary_util import delete_cloudinary_file
             delete_cloudinary_file(doc["pdf_public_id"], resource_type="raw")
         except Exception:
             pass
@@ -268,7 +268,6 @@ def legacy_epaper_delete(edition_id):
             if not public_id:
                 continue
             try:
-                from app.utils.cloudinary_util import delete_cloudinary_file
                 delete_cloudinary_file(public_id, resource_type="image")
             except Exception:
                 pass

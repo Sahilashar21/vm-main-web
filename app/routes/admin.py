@@ -48,12 +48,12 @@ def _extract_pdf_pages_to_images(pdf_bytes, lang, week):
         try:
             base_id = f"{_safe_public_id_part(lang)}-{_safe_public_id_part(week)}-{uuid.uuid4().hex}"
 
-            for page_number, page in enumerate(doc, start=1):
+            for page_number, pdf_page in enumerate(doc, start=1):
                 thumb_path = os.path.join(tmp_dir, f"p{page_number:03d}_thumb.jpg")
                 full_path = os.path.join(tmp_dir, f"p{page_number:03d}_full.jpg")
 
-                page.get_pixmap(dpi=THUMBNAIL_DPI, alpha=False).save(thumb_path, jpg_quality=THUMBNAIL_JPEG_QUALITY)
-                page.get_pixmap(dpi=FULL_PAGE_DPI, alpha=False).save(full_path, jpg_quality=FULLRES_JPEG_QUALITY)
+                pdf_page.get_pixmap(dpi=THUMBNAIL_DPI, alpha=False).save(thumb_path, jpg_quality=THUMBNAIL_JPEG_QUALITY)
+                pdf_page.get_pixmap(dpi=FULL_PAGE_DPI, alpha=False).save(full_path, jpg_quality=FULLRES_JPEG_QUALITY)
 
                 thumb_size = os.path.getsize(thumb_path)
                 full_size = os.path.getsize(full_path)

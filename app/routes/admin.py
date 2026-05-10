@@ -16,6 +16,7 @@ from app.constants.upload_tables import UPLOAD_TARGET_TABLES
 admin_bp = Blueprint("admin", __name__)
 THUMBNAIL_DPI = 72
 FULL_PAGE_DPI = 300
+BYTES_PER_MB = 1024 * 1024
 
 
 def _safe_public_id_part(value):
@@ -201,7 +202,7 @@ def legacy_epaper_upload():
             "thumbnail_total_bytes": extracted["thumbnail_total_bytes"],
             "fullres_total_bytes": extracted["fullres_total_bytes"],
             "estimated_total_mb": round(
-                (extracted["thumbnail_total_bytes"] + extracted["fullres_total_bytes"]) / (1024 * 1024), 2
+                (extracted["thumbnail_total_bytes"] + extracted["fullres_total_bytes"]) / BYTES_PER_MB, 2
             ),
             "admin_note": "300 DPI full-page images improve clarity and increase storage/bandwidth compared to older lower-resolution uploads.",
         },
@@ -261,7 +262,7 @@ def legacy_epaper_delete(edition_id):
             pass
 
     # Delete extracted page images from Cloudinary
-    for page in doc.get("page_images", []) or []:
+    for page in doc.get("page_images", []):
         for key in ("thumbnail_public_id", "fullres_public_id"):
             public_id = page.get(key)
             if not public_id:

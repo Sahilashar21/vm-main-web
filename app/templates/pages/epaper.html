@@ -1335,6 +1335,15 @@
           image.style.height = 'auto';
           image.style.objectFit = 'contain';
           image.style.borderRadius = '8px';
+          image.onerror = () => {
+            if (pdfUrl) {
+              showToast('HD image load nahi ho payi, PDF viewer fallback use kiya gaya.');
+              activeFlipPages = [];
+              openPdfViewer(pdfUrl);
+            } else {
+              showToast('HD image load nahi ho payi.');
+            }
+          };
           host.style.display = 'flex';
           host.style.alignItems = 'center';
           host.style.justifyContent = 'center';

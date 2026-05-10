@@ -43,6 +43,8 @@ def epaper_feed():
             "is_new": e.get("is_new", False),
             "pdf": e.get("pdf_url", ""),
             "pdf_url": e.get("pdf_url", ""),
+            "page_images": e.get("page_images", []),
+            "image_profile": e.get("image_profile", {}),
             "created_at": e["created_at"].isoformat() if hasattr(e.get("created_at", ""), "isoformat") else str(e.get("created_at", "")),
         })
 

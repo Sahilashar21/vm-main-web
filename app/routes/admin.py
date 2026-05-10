@@ -3,14 +3,92 @@ Admin routes: admin panel, legacy e-paper upload, excel upload, user management.
 All data stored in MongoDB + Cloudinary. No external API dependencies.
 """
 import os
+import io
+import re
+import tempfile
+import uuid
 from datetime import datetime, timezone
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 
 from app.services.auth_service import admin_required, get_logged_in_user, get_otp_provider
 from app.constants.upload_tables import UPLOAD_TARGET_TABLES
 
 admin_bp = Blueprint("admin", __name__)
+THUMBNAIL_DPI = 72
+FULL_PAGE_DPI = 300
+THUMBNAIL_JPEG_QUALITY = 88  # Balanced for fast browsing with acceptable clarity.
+FULLRES_JPEG_QUALITY = 95  # High quality to preserve text/photo sharpness.
+BYTES_PER_MB = 1024 * 1024
+
+
+def _safe_public_id_part(value):
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", (value or "").strip())
+    return cleaned.strip("-") or "edition"
+
+
+def _extract_pdf_pages_to_images(pdf_bytes, lang, week):
+    try:
+        import fitz  # PyMuPDF
+    except ImportError as exc:
+        raise RuntimeError("PyMuPDF is required for PDF page extraction.") from exc
+
+    from app.utils.cloudinary_util import upload_epaper_page_image
+
+    page_images = []
+    thumb_total = 0
+    full_total = 0
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        pdf_path = os.path.join(tmp_dir, "edition.pdf")
+        with open(pdf_path, "wb") as pdf_out:
+            pdf_out.write(pdf_bytes)
+
+        doc = fitz.open(pdf_path)
+        try:
+            base_id = f"{_safe_public_id_part(lang)}-{_safe_public_id_part(week)}-{uuid.uuid4().hex}"
+
+            for page_number, pdf_page in enumerate(doc, start=1):
+                thumb_path = os.path.join(tmp_dir, f"p{page_number:03d}_thumb.jpg")
+                full_path = os.path.join(tmp_dir, f"p{page_number:03d}_full.jpg")
+
+                pdf_page.get_pixmap(dpi=THUMBNAIL_DPI, alpha=False).save(thumb_path, jpg_quality=THUMBNAIL_JPEG_QUALITY)
+                pdf_page.get_pixmap(dpi=FULL_PAGE_DPI, alpha=False).save(full_path, jpg_quality=FULLRES_JPEG_QUALITY)
+
+                thumb_size = os.path.getsize(thumb_path)
+                full_size = os.path.getsize(full_path)
+                thumb_total += thumb_size
+                full_total += full_size
+
+                thumb_upload = upload_epaper_page_image(
+                    thumb_path,
+                    public_id=f"{base_id}_p{page_number:03d}_thumb_{THUMBNAIL_DPI}dpi",
+                )
+                full_upload = upload_epaper_page_image(
+                    full_path,
+                    public_id=f"{base_id}_p{page_number:03d}_full_{FULL_PAGE_DPI}dpi",
+                )
+
+                page_images.append({
+                    "page_number": page_number,
+                    "thumbnail_url": thumb_upload.get("url", ""),
+                    "thumbnail_public_id": thumb_upload.get("public_id", ""),
+                    "fullres_url": full_upload.get("url", ""),
+                    "fullres_public_id": full_upload.get("public_id", ""),
+                    "thumbnail_dpi": THUMBNAIL_DPI,
+                    "fullres_dpi": FULL_PAGE_DPI,
+                    "thumbnail_size_bytes": thumb_size,
+                    "fullres_size_bytes": full_size,
+                })
+        finally:
+            doc.close()
+
+    return {
+        "page_images": page_images,
+        "total_pages": len(page_images),
+        "thumbnail_total_bytes": thumb_total,
+        "fullres_total_bytes": full_total,
+    }
 
 
 @admin_bp.route("/admin")
@@ -88,11 +166,24 @@ def legacy_epaper_upload():
 
         try:
             from app.utils.cloudinary_util import upload_epaper_pdf
-            result = upload_epaper_pdf(pdf_file, filename=f"{lang}_{week}".replace(" ", "_"))
+            pdf_bytes = pdf_file.read()
+            if not pdf_bytes:
+                return jsonify({"error": "Uploaded PDF is empty."}), 400
+
+            result = upload_epaper_pdf(io.BytesIO(pdf_bytes), filename=f"{lang}_{week}".replace(" ", "_"))
             pdf_url = result.get("url", "")
             pdf_public_id = result.get("public_id", "")
+
+            extracted = _extract_pdf_pages_to_images(pdf_bytes, lang, week)
         except Exception as e:
             return jsonify({"error": f"PDF upload failed: {e}"}), 500
+    else:
+        extracted = {
+            "page_images": [],
+            "total_pages": 0,
+            "thumbnail_total_bytes": 0,
+            "fullres_total_bytes": 0,
+        }
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
@@ -106,6 +197,17 @@ def legacy_epaper_upload():
         "is_new": is_new,
         "pdf_url": pdf_url,
         "pdf_public_id": pdf_public_id,
+        "page_images": extracted["page_images"],
+        "image_profile": {
+            "thumbnail_dpi": THUMBNAIL_DPI,
+            "fullres_dpi": FULL_PAGE_DPI,
+            "total_pages": extracted["total_pages"],
+            "thumbnail_total_bytes": extracted["thumbnail_total_bytes"],
+            "fullres_total_bytes": extracted["fullres_total_bytes"],
+            "estimated_total_mb": round(
+                (extracted["thumbnail_total_bytes"] + extracted["fullres_total_bytes"]) / BYTES_PER_MB, 2
+            ),
+        },
         "created_at": datetime.now(timezone.utc),
     }
     result = col.insert_one(doc)
@@ -130,6 +232,8 @@ def legacy_epaper_list():
             "tags": e.get("tags", []),
             "is_new": e.get("is_new", False),
             "pdf_url": e.get("pdf_url", ""),
+            "total_pages": len(e.get("page_images", [])),
+            "image_profile": e.get("image_profile", {}),
             "created_at": e["created_at"].isoformat() if isinstance(e.get("created_at"), datetime) else str(e.get("created_at", "")),
         })
     return jsonify(editions)
@@ -141,6 +245,7 @@ def legacy_epaper_delete(edition_id):
     """Delete a legacy e-paper edition from MongoDB and Cloudinary."""
     from bson import ObjectId
     from app.utils.mongo import get_epaper_legacy_collection
+    from app.utils.cloudinary_util import delete_cloudinary_file
 
     col = get_epaper_legacy_collection()
     try:
@@ -154,10 +259,20 @@ def legacy_epaper_delete(edition_id):
     # Delete PDF from Cloudinary
     if doc.get("pdf_public_id"):
         try:
-            from app.utils.cloudinary_util import delete_cloudinary_file
             delete_cloudinary_file(doc["pdf_public_id"], resource_type="raw")
         except Exception:
             pass
+
+    # Delete extracted page images from Cloudinary
+    for page in doc.get("page_images", []):
+        for key in ("thumbnail_public_id", "fullres_public_id"):
+            public_id = page.get(key)
+            if not public_id:
+                continue
+            try:
+                delete_cloudinary_file(public_id, resource_type="image")
+            except Exception as exc:
+                current_app.logger.warning("Failed to delete Cloudinary page image %s: %s", public_id, exc)
 
     col.delete_one({"_id": doc["_id"]})
     return jsonify({"success": True})

@@ -1015,6 +1015,7 @@
               .map((p, pageIdx) => ({
                 page_number: p.page_number || (pageIdx + 1),
                 thumbnail_url: cloudinaryBestQuality(p.thumbnail_url || ''),
+                // Keep legacy fallback for older docs that stored only image_url.
                 fullres_url: cloudinaryBestQuality(p.fullres_url || p.image_url || ''),
               }))
               .sort((a, b) => a.page_number - b.page_number)

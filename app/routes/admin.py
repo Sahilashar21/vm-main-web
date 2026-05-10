@@ -17,6 +17,8 @@ from app.constants.upload_tables import UPLOAD_TARGET_TABLES
 admin_bp = Blueprint("admin", __name__)
 THUMBNAIL_DPI = 72
 FULL_PAGE_DPI = 300
+THUMBNAIL_JPEG_QUALITY = 88  # Balanced for fast browsing with acceptable clarity.
+FULLRES_JPEG_QUALITY = 95  # High quality to preserve text/photo sharpness.
 BYTES_PER_MB = 1024 * 1024
 
 
@@ -50,8 +52,8 @@ def _extract_pdf_pages_to_images(pdf_bytes, lang, week):
                 thumb_path = os.path.join(tmp_dir, f"p{page_number:03d}_thumb.jpg")
                 full_path = os.path.join(tmp_dir, f"p{page_number:03d}_full.jpg")
 
-                page.get_pixmap(dpi=THUMBNAIL_DPI, alpha=False).save(thumb_path, jpg_quality=88)
-                page.get_pixmap(dpi=FULL_PAGE_DPI, alpha=False).save(full_path, jpg_quality=95)
+                page.get_pixmap(dpi=THUMBNAIL_DPI, alpha=False).save(thumb_path, jpg_quality=THUMBNAIL_JPEG_QUALITY)
+                page.get_pixmap(dpi=FULL_PAGE_DPI, alpha=False).save(full_path, jpg_quality=FULLRES_JPEG_QUALITY)
 
                 thumb_size = os.path.getsize(thumb_path)
                 full_size = os.path.getsize(full_path)
@@ -164,8 +166,6 @@ def legacy_epaper_upload():
 
         try:
             from app.utils.cloudinary_util import upload_epaper_pdf
-            if getattr(pdf_file, "content_length", None) == 0:
-                return jsonify({"error": "Uploaded PDF is empty."}), 400
             pdf_bytes = pdf_file.read()
             if not pdf_bytes:
                 return jsonify({"error": "Uploaded PDF is empty."}), 400

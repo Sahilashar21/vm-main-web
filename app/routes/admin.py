@@ -9,7 +9,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 
 from app.services.auth_service import admin_required, get_logged_in_user, get_otp_provider
 from app.constants.upload_tables import UPLOAD_TARGET_TABLES
@@ -44,7 +44,7 @@ def _extract_pdf_pages_to_images(pdf_bytes, lang, week):
 
         doc = fitz.open(pdf_path)
         try:
-            base_id = f"{_safe_public_id_part(lang)}-{_safe_public_id_part(week)}-{uuid.uuid4().hex[:10]}"
+            base_id = f"{_safe_public_id_part(lang)}-{_safe_public_id_part(week)}-{uuid.uuid4().hex}"
 
             for page_number, page in enumerate(doc, start=1):
                 thumb_path = os.path.join(tmp_dir, f"p{page_number:03d}_thumb.jpg")
@@ -164,6 +164,8 @@ def legacy_epaper_upload():
 
         try:
             from app.utils.cloudinary_util import upload_epaper_pdf
+            if getattr(pdf_file, "content_length", None) == 0:
+                return jsonify({"error": "Uploaded PDF is empty."}), 400
             pdf_bytes = pdf_file.read()
             if not pdf_bytes:
                 return jsonify({"error": "Uploaded PDF is empty."}), 400
@@ -269,8 +271,8 @@ def legacy_epaper_delete(edition_id):
                 continue
             try:
                 delete_cloudinary_file(public_id, resource_type="image")
-            except Exception:
-                pass
+            except Exception as exc:
+                current_app.logger.warning("Failed to delete Cloudinary page image %s: %s", public_id, exc)
 
     col.delete_one({"_id": doc["_id"]})
     return jsonify({"success": True})

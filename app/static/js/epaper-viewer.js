@@ -824,7 +824,10 @@ const EP = {
       const blocks = page.blocks || [];
       // Find the first block with an image for the thumbnail
       const firstImg = blocks.find(b => b.image_url && b.image_url.length > 10);
-      const thumbUrl = firstImg ? this.optimizeCloudinaryUrl(firstImg.image_url, 120) : '';
+      const thumbSource = (page.thumbnail_url && page.thumbnail_url.length > 10)
+        ? page.thumbnail_url
+        : (firstImg ? firstImg.image_url : '');
+      const thumbUrl = thumbSource ? this.optimizeCloudinaryUrl(thumbSource, 120) : '';
       const isActive = (i + 1) === this.currentPage;
 
       return `

@@ -17,11 +17,7 @@ const EPAdmin = {
   resizeStart: null,
 
   CANVAS_W: 800,
-<<<<<<< HEAD
   CANVAS_H: 1000,
-=======
-  CANVAS_H: 1130,
->>>>>>> 5c6d32cc9d6a384996ee6732afc75a888006c84a
 
   init() {
     this.loadEditions();
@@ -576,11 +572,6 @@ const EPAdmin = {
           <span class="epa-badge">${edition.language || 'Hindi'}</span>
           <span style="color:var(--muted);font-size:12px">${edition.total_pages || 0} pages</span>
         </div>
-<<<<<<< HEAD
-        <button class="epa-btn epa-btn-sm epa-btn-primary" onclick="EPAdmin.editEdition('${edition.date}')">
-          <i class="fa fa-edit"></i> Edit
-        </button>
-=======
         <div style="display:flex;gap:8px;">
           <button class="epa-btn epa-btn-sm epa-btn-primary" onclick="EPAdmin.editEdition('${edition.date}')">
             <i class="fa fa-edit"></i> Edit
@@ -589,13 +580,10 @@ const EPAdmin = {
             <i class="fa fa-trash"></i> Delete
           </button>
         </div>
->>>>>>> 5c6d32cc9d6a384996ee6732afc75a888006c84a
       </div>
     `).join('');
   },
 
-<<<<<<< HEAD
-=======
   async deleteEditionByDate(date) {
     if (!confirm(`Delete edition ${date}? This cannot be undone.`)) return;
     try {
@@ -614,7 +602,6 @@ const EPAdmin = {
     }
   },
 
->>>>>>> 5c6d32cc9d6a384996ee6732afc75a888006c84a
   async editEdition(date) {
     try {
       const res = await fetch(`/api/epaper/edition/${date}`);
@@ -651,6 +638,7 @@ const EPAdmin = {
         return {
           page_number: page.page_number || pageIndex + 1,
           category: page.category || 'मुख पृष्ठ',
+          thumbnail_url: page.thumbnail_url || '',
           blocks: sourceBlocks.map((block, blockIndex) => this.normalizeBlock(block, blockIndex)),
         };
       });
@@ -686,6 +674,7 @@ const EPAdmin = {
       return {
         page_number: page.page_number,
         category: page.category || 'मुख पृष्ठ',
+        thumbnail_url: page.thumbnail_url || '',
         blocks: normalizedBlocks.map((block) => ({
           id: block.id,
           type: block.type || 'article',
@@ -781,7 +770,7 @@ const EPAdmin = {
   // ══════ PAGES ══════
 
   addPage() {
-    this.pages.push({ page_number: this.pages.length + 1, category: 'मुख पृष्ठ', blocks: [] });
+    this.pages.push({ page_number: this.pages.length + 1, category: 'मुख पृष्ठ', thumbnail_url: '', blocks: [] });
     this.renderPageTabs();
     this.openPage(this.pages.length - 1);
   },
@@ -801,11 +790,79 @@ const EPAdmin = {
     if (!tabs) return;
 
     tabs.innerHTML = this.pages.map((page, index) => `
-      <div class="epa-page-tab ${index === this.currentPageIdx ? 'active' : ''}" onclick="EPAdmin.openPage(${index})">
-        Page ${index + 1}
-        ${this.pages.length > 1 ? `<span onclick="event.stopPropagation(); EPAdmin.deletePage(${index})" style="margin-left:6px;cursor:pointer;opacity:.6">×</span>` : ''}
+      <div class="epa-page-tab-wrap">
+        <div class="epa-page-tab ${index === this.currentPageIdx ? 'active' : ''}" onclick="EPAdmin.openPage(${index})">
+          <div class="epa-page-thumb">
+            ${this.getPageThumbnailUrl(page)
+              ? `<img src="${this.getPageThumbnailUrl(page)}" alt="Page ${index + 1} thumbnail">`
+              : '<i class="fa fa-newspaper"></i>'
+            }
+          </div>
+          <div class="epa-page-tab-title">
+            <span>Page ${index + 1}</span>
+            ${this.pages.length > 1 ? `<span onclick="event.stopPropagation(); EPAdmin.deletePage(${index})" style="margin-left:6px;cursor:pointer;opacity:.6">×</span>` : ''}
+          </div>
+        </div>
+        <button type="button" class="epa-btn epa-btn-soft epa-btn-sm epa-page-replace-btn" onclick="EPAdmin.replacePageThumbnail(${index})">
+          <i class="fa fa-image"></i> Replace thumbnail
+        </button>
       </div>
     `).join('') + '<div class="epa-page-add" onclick="EPAdmin.addPage()"><i class="fa fa-plus"></i> Add Page</div>';
+  },
+
+  getPageThumbnailUrl(page) {
+    if (page?.thumbnail_url && page.thumbnail_url.length > 10) return page.thumbnail_url;
+    const firstImg = (page?.blocks || []).find((block) => block.image_url && block.image_url.length > 10);
+    return firstImg ? firstImg.image_url : '';
+  },
+
+  replacePageThumbnail(pageIndex) {
+    if (!this.currentEdition?.date) {
+      this.showToast('Please save the current edition or open an existing edition first.');
+      return;
+    }
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file) this.uploadPageThumbnail(pageIndex, file);
+    };
+    input.click();
+  },
+
+  async uploadPageThumbnail(pageIndex, file) {
+    const page = this.pages[pageIndex];
+    if (!page || !this.currentEdition?.date) return;
+    if (file.size > (10 * 1024 * 1024)) {
+      this.showToast('Please choose an image smaller than 10MB.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('image', file);
+    formData.append('edition_date', this.currentEdition.date);
+    formData.append('page_number', String(page.page_number || (pageIndex + 1)));
+
+    try {
+      const res = await fetch('/api/epaper/admin/replace-thumbnail', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        this.showToast(data.error || 'Thumbnail upload failed.');
+        return;
+      }
+
+      this.showToast('Thumbnail replaced successfully.');
+      await this.editEdition(this.currentEdition.date);
+      this.openPage(Math.min(pageIndex, this.pages.length - 1));
+    } catch (error) {
+      console.error(error);
+      this.showToast(error?.message || 'Thumbnail upload failed.');
+    }
   },
 
   openPage(idx) {
